@@ -14,7 +14,7 @@ public class AdBlockStats: LocalAdblockResourceProtocol {
   /// File name of bundled general blocklist.
   private let bundledGeneralBlocklist = "ABPFilterParserData"
 
-  fileprivate var fifoCacheOfUrlsChecked = FifoDict()
+  fileprivate var fifoCacheOfUrlsChecked = FifoDict<Bool>()
 
   // Adblock engine for general adblock lists.
   private let generalAdblockEngine: AdblockEngine
@@ -36,6 +36,27 @@ public class AdBlockStats: LocalAdblockResourceProtocol {
   public func startLoading() {
     parseBundledGeneralBlocklist()
     loadDownloadedDatFiles()
+  }
+  
+  func shouldBlock(requestURL: URL, sourceURL: URL, resourceType: AdblockEngine.ResourceType) -> Bool {
+    let key = [requestURL.absoluteString, sourceURL.absoluteString, resourceType.rawValue].joined(separator: "_")
+    
+    if let cachedResult = fifoCacheOfUrlsChecked.getElement(key) {
+        return cachedResult
+    }
+    
+    let shouldBlock = generalAdblockEngine.shouldBlock(
+      requestURL: requestURL,
+      sourceURL: sourceURL,
+      resourceType: resourceType
+    ) || (isRegionalAdblockEnabled && regionalAdblockEngine?.shouldBlock(
+      requestURL: requestURL,
+      sourceURL: sourceURL,
+      resourceType: resourceType
+    ) ?? false)
+    
+    fifoCacheOfUrlsChecked.addElement(shouldBlock, forKey: key)
+    return shouldBlock
   }
 
   private func parseBundledGeneralBlocklist() {
@@ -101,32 +122,23 @@ public class AdBlockStats: LocalAdblockResourceProtocol {
     let mainDocDomain = stripLocalhostWebServer(request.mainDocumentURL?.host ?? "")
 
     // A cache entry is like: fifoOfCachedUrlChunks[0]["www.microsoft.com_http://some.url"] = true/false for blocking
-    let key = "\(mainDocDomain)_" + stripLocalhostWebServer(url.absoluteString)
+    let key = [mainDocDomain, stripLocalhostWebServer(url.absoluteString)].joined(separator: "_")
 
-    if let checkedItem = fifoCacheOfUrlsChecked.getItem(key) {
-      if checkedItem === NSNull() {
-        return false
-      } else {
-        if let checkedItem = checkedItem as? Bool {
-          return checkedItem
-        } else {
-          log.error("Can't cast checkedItem to Bool")
-          return false
-        }
-      }
+    if let checkedItem = fifoCacheOfUrlsChecked.getElement(key) {
+        return checkedItem
     }
 
-    var isBlocked = false
+    let isBlocked = generalAdblockEngine.shouldBlock(
+      requestUrl: url.absoluteString,
+      requestHost: requestHost,
+      sourceHost: mainDocDomain
+    ) || (isRegionalAdblockEnabled && regionalAdblockEngine?.shouldBlock(
+      requestUrl: url.absoluteString,
+      requestHost: requestHost,
+      sourceHost: mainDocDomain
+    ) ?? false)
 
-    isBlocked = generalAdblockEngine.shouldBlock(requestUrl: url.absoluteString, requestHost: requestHost, sourceHost: mainDocDomain)
-
-    // Main adblocker didn't catch this rule, checking regional filters if applicable.
-    if !isBlocked, isRegionalAdblockEnabled, let regionalAdblocker = regionalAdblockEngine {
-      isBlocked = regionalAdblocker.shouldBlock(requestUrl: url.absoluteString, requestHost: requestHost, sourceHost: mainDocDomain)
-    }
-
-    fifoCacheOfUrlsChecked.addItem(key, value: isBlocked as AnyObject)
-
+    fifoCacheOfUrlsChecked.addElement(isBlocked, forKey: key)
     return isBlocked
   }
 
@@ -162,7 +174,7 @@ public class AdBlockStats: LocalAdblockResourceProtocol {
             log.debug("Adblock file with id: \(id) deserialized successfully")
             // Clearing the cache or checked urls.
             // The new list can bring blocked resource that were previously set as not-blocked.
-            self.fifoCacheOfUrlsChecked = FifoDict()
+            self.fifoCacheOfUrlsChecked = FifoDict<Bool>()
             completion(.success(()))
           } else {
             completion(.failure("Failed to deserialize adblock list with id: \(id)"))
