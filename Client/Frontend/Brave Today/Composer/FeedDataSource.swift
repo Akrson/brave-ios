@@ -386,7 +386,7 @@ public class FeedDataSource {
 
   /// Load all RSS feeds that the user has enabled
   private func loadRSSFeeds() async -> [Result<RSSDataFeed, Error>] {
-    let locations = rssFeedLocations.filter(isRSSFeedEnabled)
+    let locations = await rssFeedLocations.filter(isRSSFeedEnabled)
     return await withTaskGroup(
       of: Result<RSSDataFeed, Error>.self,
       returning: [Result<RSSDataFeed, Error>].self
