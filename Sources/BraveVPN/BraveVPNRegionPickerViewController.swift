@@ -217,7 +217,7 @@ extension BraveVPNRegionPickerViewController: UITableViewDelegate, UITableViewDa
   }
 
   private func showSuccessAlert() {
-    let animation = AnimationView(name: "vpncheckmark").then {
+      let animation = AnimationView(name: "vpncheckmark", bundle: .current).then {
       $0.bounds = CGRect(x: 0, y: 0, width: 300, height: 200)
       $0.contentMode = .scaleAspectFill
       $0.play()
